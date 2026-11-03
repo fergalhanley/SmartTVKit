@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "0.1-draft",
+  "description": "Conceptual config; build/runtime manifest not yet enforced.",
+  "build": {
+    "applicationId": "dev.smarttvkit.elsewhere",
+    "targets": [
+      "desktop",
+      "web-wasm"
+    ],
+    "declaredLocales": [
+      "en-AU",
+      "ja-JP",
+      "es-ES",
+      "fr-FR",
+      "ar"
+    ]
+  },
+  "runtime": {
+    "defaultLocale": "en-AU",
+    "api": {
+      "baseUrl": "http://localhost:8787/v1"
+    },
+    "a2ui": {
+      "source": "app/elsewhere-tv.a2ui.jsonl",
+      "surfaceId": "home"
+    },
+    "features": {
+      "live": true,
+      "vod": true,
+      "search": true,
+      "entitlements": true,
+      "epg": true,
+      "dvbiMapping": true
+    }
+  }
+}
