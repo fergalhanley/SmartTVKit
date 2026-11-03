@@ -27,6 +27,20 @@ See the [High-Level Specification](docs/HIGH_LEVEL_SPEC.md) for the proposed arc
 
 The specification is a review draft. Platform support and implementation decisions are **goals**, not promises of current support.
 
+## First runnable renderer prototype
+
+A focused Rust-rendered TV home screen is available for local testing on the [\`feat/rust-renderer-prototype\` branch](https://github.com/fergalhanley/SmartTVKit/tree/feat/rust-renderer-prototype). This is a **proof of concept**, not a production app.
+
+\`\`\`bash
+cargo run
+\`\`\`
+
+It renders a demo catalogue using an editable A2UI v0.9.1 JSONL message stream. Use arrows/WASD, Enter and Escape for navigation; press **R** after editing \`app/home.a2ui.jsonl\` to update the on-screen copy without recompiling.
+
+For the browser/WASM version use \`bash scripts/run-web.sh\` and visit \`http://localhost:8000/web/\`.
+
+See [renderer prototype documentation](docs/RENDERER_PROTOTYPE.md) for prerequisites, details, current limits and tests.
+
 ## Licence
 
 [Apache License 2.0](LICENSE).
