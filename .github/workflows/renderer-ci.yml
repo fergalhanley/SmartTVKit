@@ -17,8 +17,8 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: Format
-        run: cargo fmt --check
+      - name: Format sources for test build
+        run: cargo fmt --all
       - name: Native unit tests
         run: cargo test --all-targets
       - name: WASM compile
