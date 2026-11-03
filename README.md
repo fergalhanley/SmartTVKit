@@ -8,12 +8,15 @@ The project is at the **specification stage**. No framework implementation has b
 
 ## Intended principles
 
-- **One declarative JSON application definition**, inspired by A2UI and validated against public schemas.
+- **Directly A2UI-compatible declarative UI** with public JSON schemas, plus distinct `build` and `runtime` project configuration branches.
 - **Rich server-driven UI** for layouts, navigation, focus, theming, actions and application behaviour.
 - **Canonical data contracts** between TV clients and open-source/self-hostable backend adapters.
 - **DVB-I and HbbTV** as first-class concerns alongside conventional OTT playback.
 - **Reusable Rust core where appropriate**, with platform-specific rendering, playback and DRM integration.
 - **AI-ready tooling** and an optional local MCP interface; use any compatible LLM.
+- **First-class localisation** with configurable runtime copy and fallback language bundles.
+- **Structured error codes** shared across client and adapters, with localised error presentation.
+- **Immutable build properties** separated from remotely updatable UI/runtime properties.
 - **No hosted-service dependency** for building and operating the open-source reference application.
 
 A future optional SmartTVKit Studio/Cloud may offer managed editing, adapters, builds, testing and app lifecycle services.
