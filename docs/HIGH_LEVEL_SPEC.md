@@ -4,6 +4,8 @@
 > **Date:** 2026-11-03  
 > **Scope:** Open-source framework and reference implementation. Commercial services are described only to establish architectural boundaries.  
 > **Implementation status:** No implementation is authorised by this document. Decisions marked *proposed* remain subject to review.
+>
+> **Architecture review, 2026-11-03:** The accepted direction for the five major review topics is recorded in [Architecture Review Decisions](ARCHITECTURE_REVIEW_DECISIONS.md). **Where this initial draft has older or contradictory language, the review decisions take precedence until this document is consolidated.**
 
 ## 1. Vision
 
@@ -23,8 +25,8 @@ A future optional SmartTVKit SaaS will provide visual/AI-assisted application de
 
 ### Goals
 
-1. **Broad device reach:** reuse as much behaviour and application definition as practical across web, HbbTV, Samsung, LG, Android TV, Fire TV, tvOS, Roku and future targets.
-2. **Configuration-first:** support substantial UI and workflow changes through versioned declarative configuration rather than client binary updates.
+1. **Broad device reach and consistent experience:** use a Rust-owned scene graph/renderer wherever technically possible, with explicit conformance-tested exceptions for restricted device runtimes.
+2. **Configuration-first:** support a very high degree of UI and workflow customisation through declarative configuration, with graduated warnings/opt-ins and non-overridable capability, safety and store-policy rules.
 3. **Backend agnosticism:** clients consume SmartTVKit canonical contracts; customer backend transformation belongs in adapters/gateways.
 4. **Broadcast + OTT convergence:** treat DVB-I service discovery, live TV, programme information and HbbTV as first-class product domains, not optional afterthoughts.
 5. **Open-source independence:** developers can run, configure, test, build and self-host the framework without subscribing to managed services.
@@ -57,9 +59,9 @@ Representative experiences: content catalogue and VOD playback; FAST/live channe
 
 1. **Stable shell, evolving application definition.** Device-native integration remains in a relatively stable shell; presentation and supported workflows are declared remotely where permitted.
 2. **Data contract at the boundary.** Client rendering components never depend directly on customer-specific CMS response structures.
-3. **One authoring contract, multiple runtimes.** A single schema can be interpreted by platform renderers, with explicit capability differences and fallbacks.
+3. **One directly A2UI-compatible UI contract, one preferred Rust renderer.** The same UI protocol and TV component catalogue should drive the Rust layout, focus, animation and scene-graph engine. Restricted targets need conformance-tested renderers or explicit exclusions.
 4. **Explicit capabilities, not optimistic assumptions.** Features are enabled according to declared capabilities for a concrete runtime, OS and device.
-5. **No arbitrary code in configuration.** Configuration references an approved component, expression and action catalogue.
+5. **Rich but governed configuration.** Configuration uses approved components, expressions and actions, with warnings and recorded risk overrides where permissible; security, invalid schema, absent hardware APIs and mandatory store policies remain hard barriers.
 6. **Open-source parity of semantics.** Locally authored and SaaS-authored app definitions have the same meaning.
 7. **Platform playback is authoritative.** Use hardware-supported player/DRM stacks rather than building a universal video decoder in Rust.
 8. **Versioning and rollback from day one.** Schemas, runtimes, configuration, adapters and published releases have independent identities.
@@ -95,7 +97,7 @@ Representative experiences: content catalogue and VOD playback; FAST/live channe
 ### Major subsystems
 
 - **Application definition:** declarative UI, routes, actions, bindings, themes, data requests, capability constraints and feature flags.
-- **Core runtime:** validates/interprets definitions, owns logical app state, navigation intent, action dispatch and playback orchestration.
+- **Rust-owned UI runtime (preferred):** validates/interprets A2UI, owns scene graph, layout, focus, frame scheduling, animations, logical state, action dispatch and playback orchestration; uses platform GPU bridges and native player composition. Restricted platforms require conformance-tested alternatives.
 - **Platform adapter:** rendering, remote input, focus integration, player/DRM, storage, network, lifecycle and logging.
 - **Canonical API and gateway:** stable device-facing resources, adapters for disparate backends, cache and policy enforcement.
 - **Tooling:** schema generation, validation, preview, developer CLI, test fixtures and optional MCP server.
@@ -109,7 +111,7 @@ The architecture distinguishes a **control plane** (app definitions, build/relea
 
 - Use **JSON**, not YAML, as the canonical application definition format.
 - Define a SmartTVKit **JSON Schema** and publish machine-readable component, action and capability catalogues.
-- Borrow from **A2UI**: declarative component IDs, a component catalogue, binding, actions and separation of view structure from data. SmartTVKit is initially **A2UI-inspired**, not automatically wire-compatible with the upstream A2UI protocol.
+- Implement **direct compatibility with pinned A2UI v0.9.1 UI messages and binding semantics**, including its standard surface envelopes and custom component-catalogue mechanism. TV components are delivered in a SmartTVKit A2UI catalog; app identity, routes, release metadata and capabilities live in a separate SmartTVKit manifest.
 - Use **DTCG design tokens** for themes where appropriate, **JSON Pointer** for simple bindings, and evaluate a safe restricted expression language such as **CEL** for conditional behaviour.
 - Prefer immutable, versioned application definition snapshots at startup. Incremental JSON Patch-style updates may be added later.
 - All syntax and built-in functions must be deterministic and portable across target runtimes.
@@ -157,7 +159,7 @@ The first schema RFC must decide whether to use A2UI's flat adjacency-list model
 
 ## 7. Canonical data model and adapter gateway
 
-The app runtime sees **versioned SmartTVKit domain contracts**, independent of source vendor:
+The app runtime sees **versioned SmartTVKit domain contracts**, independent of source vendor. In DVB-I scenarios the original service identifier is retained so client-side service discovery and the adapter's backend enrichment can reconcile consistently:
 
 - **Catalogue:** Content, Series, Season, Episode, Collection, Artwork, Genre, Availability.
 - **Live and broadcast:** Service, Channel, Programme, Schedule/EPG, ServiceList, ServiceInstance.
@@ -170,7 +172,7 @@ Requirements:
 1. Publish JSON Schema/OpenAPI contracts for the canonical API, independently of individual source adapters.
 2. Normalise source differences **in an adapter gateway**, not in platform renderers or screen definitions.
 3. Support both **open-source self-hosted adapters** and optional **SaaS-hosted adapters** over the same client-facing contract.
-4. Permit reusable connector packages and customer-specific transformation rules; maintain namespaced extensions so DVB-I-specific metadata is not discarded.
+4. Permit reusable connector packages and **service-provider-owned DVB-I service-ID mapping rules** between the same service lists retrieved by TV/backend and external CMS/EPG sources; report unmapped, conflicting or stale records. Keep the service ID distinct from instances, delivery methods and channel numbers, and retain namespaced DVB-I extensions.
 5. Never expose backend API credentials, service tokens or transformation secrets to a client configuration.
 6. Support per-tenant isolation, bounded execution and outbound-network allowlists if future SaaS allows custom adapter code.
 7. Avoid forcing all player traffic through the gateway; return authorised stream/DRM metadata and use appropriate direct playback paths.
@@ -184,9 +186,9 @@ DVB-I support is a first-class differentiator, with a distinct standards-aware m
 
 ### Initial DVB-I capability goals
 
-- Resolve a configured DVB-I entry point and retrieve/validate service lists.
+- Resolve configured DVB-I service lists on the device and, where appropriate, independently in the adapter gateway; preserve original IDs and source provenance for customer-defined reconciliation.
 - Represent services, service instances, metadata and associated programme information without lossy flattening.
-- Merge suitable DVB-I services into a familiar channel list and EPG user experience.
+- Enrich DVB-I services using customer-owned mappings into canonical channel/EPG/content data. Surface missing or conflicting mappings instead of inventing associations. Native TV receiver channel lists are only accessible where the OS exposes suitable APIs.
 - Select playback delivery options according to available device capabilities and metadata.
 - Diagnose malformed or unsupported metadata, including reproducible sample fixtures.
 - Separate **DVB-I service discovery and application experiences** from **native TV receiver/tuner integration**, which requires appropriate device support.
@@ -206,19 +208,19 @@ DVB-I alignment is intended with **ETSI TS 103 770 / DVB BlueBook A177** and imp
 
 | Platform family | Proposed route | Initial status |
 | --- | --- | --- |
-| Desktop web/browser | Web renderer + Rust/WASM where appropriate | First proof target |
-| HbbTV web runtimes | Web/HbbTV adapter; JS fallback where WASM unavailable | Early DVB-I proof target |
-| LG webOS | Web application; platform playback integration | Early validation |
-| Samsung Tizen | Packaged web application; platform playback integration | Early validation |
-| Android TV / Fire OS | Android shell; Rust native core through FFI/JNI; native player | Early validation |
-| Apple tvOS | Native shell/renderer + shared Rust library where useful | Later |
-| Roku | Separate renderer/runtime implementation using shared schemas/contracts; no assumed Rust/WASM support | Later |
+| Desktop browser development harness (not production TV proof) | Rust UI scene graph via WASM + web graphics where viable | M0 developer preview |
+| HbbTV web runtimes | Prefer Rust-owned WASM/graphics renderer with HbbTV integration; alternate renderer/exclusion for legacy constraints | Early DVB-I device proof |
+| LG webOS | Packaged TV web shell; prefer Rust WASM GPU UI renderer where supported | Early hardware validation |
+| Samsung Tizen | Packaged TV web shell; prefer Rust WASM GPU UI renderer where supported | Early hardware validation |
+| Android TV / Fire OS | Rust-owned native renderer/scene graph with Android shell and native player | Early hardware validation |
+| Apple tvOS | Rust-owned renderer plus native tvOS shell/player and GPU integration | Later |
+| Roku | A2UI-conformant alternate renderer; direct Rust/GPU execution unproven | Later |
 | Amazon Vega OS | Investigate approved native/React Native integrations and remote update rules | Research |
 | VIDAA, Xbox, PlayStation, other embedded TVs | Feasibility, device access and distribution dependent | Research |
 
 The core may be implemented in Rust, but **Rust execution on every target is not a prerequisite**. The invariant is the observable behaviour of the JSON schema, canonical data contract and compatibility tests.
 
-TV UI rendering strategy (web vs platform-native vs cross-platform framework) is an explicit technical spike, not an already-made commitment.
+**Rendering decision:** prefer a Rust-owned scene graph/graphics engine rather than JS/DOM or independent native UI layers. The technical spike selects graphics backends and defines per-platform fallback/exclusions; do not promise every target runs Rust. Treat desktop-browser preview and production web-runtime TVs (Tizen, webOS, VIDAA, HbbTV) as separate support classes.
 
 ## 10. Playback and device integration
 
@@ -310,8 +312,8 @@ Proposed test layers:
 - **Interpreter tests:** component graph, binding, actions, route state and focus graph; deterministic replay.
 - **Adapter tests:** mapping, malformed input, pagination, timeouts and isolation, including DVB-I metadata samples.
 - **Playback tests:** supported manifests, source selection, lifecycle and error outcomes.
-- **Platform harness:** remote input, focus, lifecycle, launch latency, memory pressure and device capability probes.
-- **Release tests:** compatible/incompatible configs, signed asset verification, offline fallback, rollout and rollback.
+- **Platform harness:** remote input, focus, lifecycle, launch latency, animation smoothness/frame pacing, font/rendering fidelity, secure video overlay behaviour, memory pressure and device capability probes.
+- **Release/policy tests:** A2UI message/catalog conformance, device-specific warnings, opt-in overrides and non-overridable hard failures; compatible/incompatible configs, signed assets, offline fallback, rollout and rollback.
 
 Use CI for deterministic checks; hardware-in-the-loop and manual certification checks remain explicit requirements as platforms mature.
 
@@ -342,9 +344,9 @@ No client data or app-definition lock-in: provide export/import and self-hosting
 
 - Approve product principles and architecture boundary.
 - Write initial RFCs for application JSON, canonical API, capability manifest and focus navigation.
-- Prototype one UI screen rendered from config on desktop web; validate whether A2UI concepts meet TV needs.
+- Prototype a directly A2UI-compatible screen and SmartTVKit TV catalogue rendered by a Rust-owned scene graph in a desktop-browser harness, then test graphics/performance on actual TVs.
 - Prototype parsing/validation of a sample DVB-I service list.
-- Decide whether Rust/WASM is appropriate for the initial renderer, and record the decision.
+- Investigate native and web-runtime GPU backends for the Rust renderer, video overlay/DRM integration and explicit fallback profiles; record feasibility on named hardware.
 
 **Exit:** a minimal spec and known implementation risks, accepted before framework code expands.
 
@@ -398,27 +400,29 @@ Early success is measured by **independent reuse and portability**, not line cou
 | --- | --- | --- |
 | D-01 | Apache 2.0 open-source project with optional hosted services | Existing licence / proposed product principle |
 | D-02 | JSON application definition validated by JSON Schema | Proposed |
-| D-03 | Borrow from A2UI; do not promise native protocol compatibility yet | Proposed |
-| D-04 | Canonical API + open self-hostable adapter gateway | Proposed |
-| D-05 | Rust for reusable core where practical, with platform-specific renderer/shell exceptions | Proposed |
+| D-03 | Direct A2UI v0.9.1 UI protocol compatibility; SmartTVKit TV catalogue and separate application manifest | Agreed direction; RFC pending |
+| D-04 | Canonical API + open gateway; provider-owned DVB-I service-ID mappings across TV and backend sources | Agreed direction; RFC pending |
+| D-05 | Rust-owned scene graph/layout/focus/animation renderer as primary UI, with tested exceptions on restricted runtimes | Agreed direction; feasibility pending |
 | D-06 | First-class DVB-I/HbbTV module and an early proof target | Proposed |
 | D-07 | Remote config broadly; remote executable runtime only where allowed | Proposed |
 | D-08 | MCP as an optional developer/management interface, not a client runtime dependency | Proposed |
-| D-09 | Broad target matrix with gated/verified support claims | Proposed |
+| D-09 | Separate desktop-browser harness from actual web-runtime TVs; device-verified support matrix | Agreed direction |
 | D-10 | SaaS commercial capabilities kept outside the core OSS dependency path | Proposed |
+| D-11 | High UI config expressiveness with graded warnings/acknowledgements and non-overridable hard policy checks | Agreed direction; RFC pending |
 
 ## 20. Open questions for the next RFCs
 
-1. **UI runtime:** Should the first web renderer use conventional JS/TS components with Rust/WASM logic, a Rust-rendered DOM approach, or another UI engine? Assess remote-focus performance on entry-level TVs.
-2. **A2UI compatibility:** Do we use A2UI v0.9.1's component/event wire format, an adapted static-document format, or a conversion layer? Document exactly which parts are compatible.
+1. **Rust UI engine:** Which scene graph, typography/layout library and GPU backend supports native-like motion, deterministic D-pad focus and good video-layer composition on lower-end TV hardware?
+2. **A2UI conformance:** How exactly should the SmartTVKit TV catalogue, separate app manifest, multi-screen routing, focus and streaming message handling map onto unmodified A2UI v0.9.1 envelopes?
 3. **Focus graph:** Explicit directional edges vs spatial navigation default vs hybrid model; how should focus survive async catalogue updates?
-4. **Canonical API:** What is the minimal data contract for the first OTT + DVB-I reference application? Choose IDs, localisation, pagination and optional extensions.
+4. **Canonical API and DVB-I mapping:** What is the minimal OTT + DVB-I contract; how are qualified service IDs, backend reconciliation, provider mapping diagnostics, localisation and service instances represented?
 5. **Adapter authoring:** Start with code-based adapters only, or ship a declarative mapping DSL early?
 6. **Authentication:** Which session/device-pairing flows must be common, and which are hosted entirely by customers?
 7. **Content delivery:** How do DRM and region-specific entitlement flows fit the playback resolver contract?
-8. **Support matrix:** Which exact devices/OS versions become M2 acceptance targets, and what is the minimum acceptable boot time?
+8. **Support matrix:** Which exact TV models/OS engines become M2 targets, and what are acceptable frame-time, memory, focus latency, boot time and fallback thresholds?
 9. **Distribution:** Which platforms permit hosted assets, and which require packaged-only runtimes for concrete app classes and store policies?
-10. **Project organisation:** What governance, contributor policy, release cadence and naming conventions do we want before inviting contributions?
+10. **Configuration restriction engine:** What warnings, opt-in overrides, non-overridable errors and compatibility diagnostics are needed for CLI/MCP and release gating?
+11. **Project organisation:** What governance, contributor policy, release cadence and naming conventions do we want before inviting contributions?
 
 ## 21. Standards and reference documents
 
