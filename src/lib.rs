@@ -5,6 +5,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 
+pub mod source;
+
 pub const BUNDLED_A2UI: &str = include_str!("../app/home.a2ui.jsonl");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
