@@ -22,7 +22,8 @@
     },
     "a2ui": {
       "source": "app/elsewhere-tv.a2ui.jsonl",
-      "surfaceId": "home"
+      "surfaceId": "home",
+      "endpoint": "/a2ui/home"
     },
     "features": {
       "live": true,
