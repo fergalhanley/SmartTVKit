@@ -87,13 +87,21 @@ cargo build --release --target wasm32-unknown-unknown
 
 GitHub Actions runs the unit tests and WASM compilation on the pull request. CI compilation does **not** establish visual fidelity or playback compatibility on smart-TV hardware.
 
+## Desktop playback prototype
+
+When an A2UI Card's text binding points to a canonical catalogue item with a sibling stable `id`, SmartTVKit can request a playback source through the backend's entitlement-gated `/v1/playback/:id` API. The UI draws the details screen in Rust; **Enter / P** resolves playback on a background thread and starts an external desktop player through a platform adapter. It reports backend error codes in the details screen.
+
+The companion Elsewhere TV local runner serves the generated sample MP4 for one VOD and one simulated live channel; production playback continues to require configured Stream media. See [Elsewhere TV example](../examples/elsewhere-tv/README.md).
+
+Video rendering is **not yet embedded inside the SmartTVKit canvas**. macOS player integration is via ffplay, mpv or QuickTime Player launch; browser builds do not yet have a playback adapter. More extensive native playback, DRM and secure video-plane integration require a separate implementation.
+
 ## Not implemented yet
 
 - Actual Samsung/LG/HbbTV device validation.
 - A2UI protocol conformance suite, full component catalogue, incremental routing/state and client-to-server actions.
 - Persistent runtime release manifests, signature validation, build-time config enforcement, locale bundles or error-code registry.
 - Remote backend adapters, DVB-I data model and service-ID reconciliation.
-- Physical remote input adapter, certified playback/DRM and secure video overlay composition.
+- Physical remote input adapter, **in-canvas native player**, certified playback/DRM and secure video overlay composition.
 - Smoothness/performance measurements on representative TV hardware.
 
 ## Why Macroquad?

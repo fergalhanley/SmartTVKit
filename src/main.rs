@@ -5,6 +5,8 @@
 use macroquad::prelude::*;
 use smarttvkit_demo::{Direction, Navigation, Scene, BUNDLED_A2UI};
 use smarttvkit_demo::source::{from_project, SceneSource};
+#[cfg(not(target_arch = "wasm32"))]
+use smarttvkit_demo::playback::{self, PlaybackSettings};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -128,6 +130,38 @@ async fn load_browser_scene(source: &SceneSource) -> Result<Scene, String> {
         return Err("A2UI response exceeds 1 MiB".into());
     }
     Scene::from_a2ui_jsonl(&content).map_err(|error| error.to_string())
+}
+
+/// Resolve the video source and start a desktop player off the render thread.
+#[cfg(not(target_arch = "wasm32"))]
+fn request_playback(settings: PlaybackSettings, content_id: String)
+    -> Receiver<Result<String, playback::PlaybackError>>
+{
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = playback::resolve(&settings, &content_id)
+            .and_then(|session| playback::launch(&session));
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// The example's API base comes from runtime config rather than any
+/// Elsewhere-TV-specific hard-coded data or title matching.
+#[cfg(not(target_arch = "wasm32"))]
+fn playback_settings() -> Option<PlaybackSettings> {
+    let project_path = std::env::var("SMARTTVKIT_PROJECT")
+        .unwrap_or_else(|_| "app/project.json".into());
+    let contents = std::fs::read_to_string(&project_path).ok()?;
+    let locale = std::env::var("SMARTTVKIT_LOCALE").ok();
+    let tier = std::env::var("SMARTTVKIT_DEMO_TIER").ok();
+    match PlaybackSettings::from_project(&contents, locale.as_deref(), tier.as_deref()) {
+        Ok(settings) => Some(settings),
+        Err(error) => {
+            eprintln!("SmartTVKit playback config: {error}");
+            None
+        }
+    }
 }
 
 fn draw_background(time: f32) {
@@ -323,7 +357,7 @@ fn draw_focus(x: f32, y: f32, time: f32) {
     );
 }
 
-fn draw_details(scene: &Scene, nav: &Navigation) {
+fn draw_details(scene: &Scene, nav: &Navigation, playback_status: &str) {
     if !nav.details_open {
         return;
     }
@@ -341,27 +375,37 @@ fn draw_details(scene: &Scene, nav: &Navigation) {
             rgb(171, 185, 207),
         );
         draw_text(
-            "Playback integration belongs to the next milestone.",
+            "Press ENTER or P to request playback from the backend.",
             270.0,
             385.0,
             20.0,
             rgb(139, 155, 180),
         );
-        draw_rectangle(270.0, 462.0, 195.0, 50.0, rgb(61, 153, 172));
-        draw_text("BACK  (ESC)", 297.0, 494.0, 21.0, WHITE);
+        let info = if card.content_id.is_some() {
+            playback_status
+        } else {
+            "No media ID in the loaded A2UI scene"
+        };
+        let shortened: String = info.chars().take(75).collect();
+        draw_text(&shortened, 270.0, 425.0, 17.0, rgb(120, 215, 222));
+        draw_rectangle(270.0, 462.0, 218.0, 50.0, rgb(61, 153, 172));
+        draw_text("PLAY (ENTER)", 289.0, 494.0, 20.0, WHITE);
+        draw_rectangle(510.0, 462.0, 195.0, 50.0, rgb(43, 56, 76));
+        draw_text("BACK (ESC)", 530.0, 494.0, 20.0, WHITE);
     }
 }
 
 fn draw_footer(status: &str) {
     draw_rectangle(0.0, 678.0, VIEW_W, 42.0, translucent(rgb(5, 12, 23), 0.58));
     draw_text(
-        "ARROWS: NAVIGATE    ENTER: DETAILS    ESC: BACK    R: RELOAD A2UI",
+        "ARROWS: MOVE    ENTER: DETAILS/PLAY    P: PLAY    ESC: BACK    R: RELOAD",
         108.0,
         704.0,
         16.0,
         rgb(159, 176, 197),
     );
-    let summary = format!("{}  |  {} FPS", status, get_fps());
+    let short_status: String = status.chars().take(36).collect();
+    let summary = format!("{}  |  {} FPS", short_status, get_fps());
     let width = measure_text(&summary, None, 15, 1.0).width;
     draw_text(
         &summary,
@@ -411,6 +455,11 @@ async fn main() {
     }
 
     let mut navigation = Navigation::default();
+    let mut playback_status = "No playback requested".to_owned();
+    #[cfg(not(target_arch = "wasm32"))]
+    let playback_config = playback_settings();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut pending_playback: Option<Receiver<Result<String, playback::PlaybackError>>> = None;
     let mut focus_x = CARD_LEFT;
     let mut focus_y = ROW_YS[0] - 6.0;
 
@@ -427,8 +476,32 @@ async fn main() {
         if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
             navigation.move_direction(Direction::Down, &scene);
         }
-        if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+        let submit = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space);
+        let play = is_key_pressed(KeyCode::P) || (submit && navigation.details_open);
+        if submit && !navigation.details_open {
             navigation.enter(&scene);
+            playback_status = "Select PLAY to begin playback".to_owned();
+        }
+        if play && navigation.details_open {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if pending_playback.is_none() {
+                    match (navigation.selected(&scene).and_then(|card| card.content_id.clone()),
+                           playback_config.clone()) {
+                        (Some(content_id), Some(settings)) => {
+                            pending_playback = Some(request_playback(settings, content_id));
+                            playback_status = "Resolving playback and entitlement...".into();
+                        }
+                        (None, _) => playback_status = "No content ID in this A2UI fixture".into(),
+                        (_, None) => playback_status =
+                            "Configure runtime.api.baseUrl in SMARTTVKIT_PROJECT".into(),
+                    }
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                playback_status = "Browser video adapter is not implemented yet".into();
+            }
         }
         if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Backspace) {
             navigation.back();
@@ -452,6 +525,29 @@ async fn main() {
                 Some(Err(TryRecvError::Disconnected)) => {
                     pending = None;
                     status = "A2UI REQUEST INTERRUPTED".to_owned();
+                }
+                _ => {}
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let completion = pending_playback.as_ref().map(|rx| rx.try_recv());
+            match completion {
+                Some(Ok(Ok(message))) => {
+                    pending_playback = None;
+                    playback_status = message.clone();
+                    status = "PLAYER LAUNCHED".into();
+                }
+                Some(Ok(Err(error))) => {
+                    pending_playback = None;
+                    eprintln!("SmartTVKit playback: {error}");
+                    playback_status = format!("{}: {}", error.code, error.message);
+                    status = "PLAYBACK ERROR".into();
+                }
+                Some(Err(TryRecvError::Disconnected)) => {
+                    pending_playback = None;
+                    playback_status = "Playback request interrupted".into();
                 }
                 _ => {}
             }
@@ -513,7 +609,7 @@ async fn main() {
                 draw_focus(focus_x, focus_y, time);
             }
         }
-        draw_details(&scene, &navigation);
+        draw_details(&scene, &navigation, &playback_status);
         draw_footer(&status);
 
         next_frame().await;

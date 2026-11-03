@@ -45,6 +45,8 @@ SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json cargo run
 
 This fetches the A2UI screen at startup and refreshes directly with **R**, without the old Python sync script. See [Elsewhere TV example](examples/elsewhere-tv/README.md).
 
+On the `feat/desktop-playback` branch, the Elsewhere TV example also supports **Enter → details → Enter/P → entitlement-gated playback** in a separate native desktop media player. Run the companion backend's local media generator first. See [playback instructions](examples/elsewhere-tv/README.md).
+
 For the browser/WASM version use \`bash scripts/run-web.sh\` and visit \`http://localhost:8000/web/\`.
 
 See [renderer prototype documentation](docs/RENDERER_PROTOTYPE.md) for prerequisites, details, current limits and tests.

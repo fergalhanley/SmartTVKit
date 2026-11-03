@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 pub mod source;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod playback;
 
 pub const BUNDLED_A2UI: &str = include_str!("../app/home.a2ui.jsonl");
 
@@ -24,6 +26,8 @@ impl std::error::Error for ConfigError {}
 pub struct Card {
     pub id: String,
     pub title: String,
+    /// Stable media identity from the sibling canonical data object, if supplied.
+    pub content_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +159,7 @@ impl Scene {
                         cards.push(Card {
                             id: id.to_owned(),
                             title: resolve_text(title_node, &data)?,
+                            content_id: resolve_card_content_id(title_node, &data),
                         });
                     }
                     if cards.is_empty() {
@@ -223,6 +228,21 @@ fn check_surface(msg: &Value, surface: &Option<String>) -> Result<(), ConfigErro
         return Err(ConfigError("A2UI surfaceId mismatch".into()));
     }
     Ok(())
+}
+
+/// Prototype binding convention: a Card's title refers to a canonical
+/// catalogue object with a sibling stable content `id`. This does not change
+/// the upstream A2UI message envelope or mandate a custom Card property.
+fn resolve_card_content_id(text: &Value, data: &Value) -> Option<String> {
+    let path = text.get("text")?.get("path")?.as_str()?;
+    let parent = path.strip_suffix("/title")?;
+    let id_path = format!("{parent}/id");
+    let id = data.pointer(&id_path)?.as_str()?;
+    if id.is_empty() || id.len() > 200 ||
+       !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    Some(id.to_owned())
 }
 
 fn resolve_text(text: &Value, data: &Value) -> Result<String, ConfigError> {
@@ -319,6 +339,19 @@ mod tests {
         let edited = BUNDLED_A2UI.replace("After the Horizon", "After the Sunrise");
         let scene = Scene::from_a2ui_jsonl(&edited).unwrap();
         assert_eq!(scene.rails[0].cards[0].title, "After the Sunrise");
+    }
+
+    #[test]
+    fn canonical_content_ids_follow_a2ui_data_bindings() {
+        // Real backend fixtures already attach IDs to catalogue/live records.
+        let updated = BUNDLED_A2UI.replace(
+            r#""title":"After the Horizon""#,
+            r#""id":"the-moon-is-a-liar","title":"After the Horizon""#
+        );
+        let scene = Scene::from_a2ui_jsonl(&updated).unwrap();
+        assert_eq!(scene.rails[0].cards[0].content_id.as_deref(),
+            Some("the-moon-is-a-liar"));
+        assert_eq!(scene.rails[0].cards[1].content_id, None);
     }
 
     #[test]
