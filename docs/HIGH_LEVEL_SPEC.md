@@ -26,13 +26,15 @@ A future optional SmartTVKit SaaS will provide visual/AI-assisted application de
 ### Goals
 
 1. **Broad device reach and consistent experience:** use a Rust-owned scene graph/renderer wherever technically possible, with explicit conformance-tested exceptions for restricted device runtimes.
-2. **Configuration-first:** support a very high degree of UI and workflow customisation through declarative configuration, with graduated warnings/opt-ins and non-overridable capability, safety and store-policy rules.
+2. **Configuration-first:** support a very high degree of UI and workflow customisation through declarative configuration, with graduated warnings/opt-ins and non-overridable capability, safety and store-policy rules. Separate immutable build-time settings from remotely versioned runtime settings.
 3. **Backend agnosticism:** clients consume SmartTVKit canonical contracts; customer backend transformation belongs in adapters/gateways.
 4. **Broadcast + OTT convergence:** treat DVB-I service discovery, live TV, programme information and HbbTV as first-class product domains, not optional afterthoughts.
 5. **Open-source independence:** developers can run, configure, test, build and self-host the framework without subscribing to managed services.
 6. **AI-ready authoring:** publish schemas, examples, component descriptions and machine-readable validation; support optional MCP tooling for local or hosted development.
 7. **Production discipline:** design for TV remote navigation, hardware playback, security, low-resource devices, observability and store policy constraints.
 8. **Community compatibility feedback:** accept reproducible device/firmware reports and turn findings into regression tests and capability records.
+9. **Localisation as configuration:** make in-app copy, locale negotiation and translation bundles configurable without ordinary client code changes.
+10. **Structured errors:** expose stable language-neutral error codes with localised user-facing messages and actionable diagnostics.
 
 ### Non-goals (initially)
 
@@ -120,10 +122,14 @@ The architecture distinguishes a **control plane** (app definitions, build/relea
 
 | Domain | Examples |
 | --- | --- |
-| Application metadata | IDs, schema version, runtime compatibility, locale, required capabilities |
+| Build-time configuration | Target OS, application/package ID, permissions/entitlements, store assets and metadata, declared locales, compiled capabilities |
+| Runtime configuration | A2UI surfaces, routes, theming, feature flags, copy resources, data-source selectors, error presentation |
+| Application metadata | Schema version, build manifest version, runtime compatibility, locale, required capabilities |
 | Routes/screens | Initial route, route table, state restoration, transitions |
 | UI components | Hero, content rail, collection grid, search, details, channel guide, player overlays, modal |
 | Layout/theming | Design tokens, breakpoints/safe area, typography, styling, media assets |
+| Localisation and configurable copy | Stable string IDs, BCP 47 locales, fallbacks, plural/select, formatting, direction and translation resource references |
+| Error presentation | Stable error-code to message-key mappings, appropriate retry/fallback actions, redacted diagnostic identifiers |
 | Focus | Initial focus, directional navigation rules, focus restoration, virtualised lists |
 | Data binding | Refer to canonical objects, selectors, loading/error/empty states |
 | Actions | Navigate, select content, play, seek, switch channel, request data, authenticate |
@@ -133,29 +139,62 @@ The architecture distinguishes a **control plane** (app definitions, build/relea
 
 **Important limitation:** configuration only activates capabilities already shipped and approved in the installed runtime. A new native API, DRM mechanism or unsupported component still requires a new appropriate runtime release, and policy review may be necessary even for some remote feature changes.
 
-### Example (illustrative, NOT an approved schema)
+### Separate build-time and runtime branches
+
+The SmartTVKit **project configuration** shall define two distinct, independently validated JSON Schema roots:
+
+- **`build`** — selected and frozen before packaging: target platforms, package/app IDs, OS permissions/entitlements, native capabilities, store-facing metadata and assets, declared locales, signing **references** and bundled fallback selection. These values are embedded in a build manifest. Private signing keys are never packaged or delivered to the client.
+- **`runtime`** — versioned and remotely deployable when permitted: standard A2UI surfaces/component configuration, screen routing, navigation, themes, feature flags, display copy/locale resources, non-secret API selectors, error presentation and experiments.
+
+The authoring format may place these roots in one document or separate files. **Build-only properties are never remotely writable**: the runtime publisher, SDK and MCP must reject them even when an administrator explicitly opts into other configuration risks. A change to a platform package identifier, launcher icon, native permission or store-facing locale declaration may necessitate a new binary/store submission. The installed shell advertises its immutable `buildId` and supported runtime/schema capabilities for compatibility validation.
+
+Illustrative **project envelope**, not a final schema or an A2UI message:
 
 ```json
 {
   "schemaVersion": "0.1-draft",
-  "application": { "id": "sample-tv", "title": "Sample TV" },
-  "requiredCapabilities": ["navigation.dpad", "playback.hls"],
-  "initialRoute": "home",
-  "screens": {
-    "home": {
-      "root": "homeColumn",
-      "components": [
-        { "id": "homeColumn", "component": "Column", "children": ["featured"] },
-        { "id": "featured", "component": "ContentRail",
-          "items": { "path": "/catalogue/featured" },
-          "onSelect": { "action": "openDetails" } }
-      ]
+  "build": {
+    "applicationId": "org.example.player",
+    "targets": ["tizen"],
+    "declaredLocales": ["en-AU", "ja-JP"]
+  },
+  "runtime": {
+    "defaultLocale": "en-AU",
+    "surfaces": ["home"],
+    "localisationBundles": {
+      "en-AU": "locales/en-AU.json",
+      "ja-JP": "locales/ja-JP.json"
     }
   }
 }
 ```
 
-The first schema RFC must decide whether to use A2UI's flat adjacency-list model verbatim, how state and async resources are expressed, and how focus metadata is attached. Do not treat this sketch as a contract.
+The example's `surfaces` entries reference **separate standard A2UI message streams**, with an explicit SmartTVKit TV component catalogue. The A2UI protocol envelopes and binding semantics must remain unchanged; we must not confuse the project manifest with upstream A2UI itself.
+
+### First-class localisation and copy
+
+- All built-in user-visible copy, including errors, navigation, buttons, empty states, accessibility labels and programme presentation, should resolve through stable translation keys and locale-aware resources. Avoid hardcoded English inside reusable components.
+- Use **BCP 47 locale tags** and a deterministic fallback chain (user-profile override, supported device locale, configured app default, then explicit fallback). Locale preferences may change without a binary update when compatible runtime resources are available.
+- Support named parameters, pluralisation, select variants, dates/times, numbers and currency, and right-to-left text direction as part of a specified formatter. The concrete standard/implementation is an RFC choice.
+- Customers may update translation bundles through runtime config; build metadata for store listings or launcher UI remains build-time and store-policy dependent.
+- Validate required keys, format-argument types, fallback completeness and missing translations. Localised content/EPG metadata from canonical APIs should respect requested locale while retaining sensible fallback.
+
+### Stable error codes and localised recovery
+
+Errors are structured machine-readable values, **never only display strings**.
+
+- Publish a **versioned registry** of stable, namespaced error identifiers covering runtime/configuration, rendering, focus/navigation, data adapters, authentication, DVB-I service discovery/mapping and playback/DRM.
+- A canonical error carries at least `code`, category/severity, retryability/recovery class, a localisation `messageKey`, safe typed parameters and a redacted correlation ID. Preserve safe provider-native detail for diagnostics without tying UI screens to vendor codes.
+- Example **illustrative identifiers**: `STVK.CONFIG.INCOMPATIBLE_RUNTIME`, `STVK.DVBI.SERVICE_MAPPING_CONFLICT`, `STVK.PLAYBACK.UNSUPPORTED_FORMAT`.
+- Customer-facing error copy/actions are configurable in runtime JSON via the localisation catalogue and existing A2UI component/action semantics. Technical codes remain stable across languages and supported platforms.
+- Never disclose personal information, secrets or DRM licence payloads through errors or public GitHub diagnostics.
+
+The error registry should be shared by CLI, gateway, core runtime, native adapters, MCP validation and the future managed monitoring service. Error-code compatibility and deprecation rules will be in a follow-on RFC.
+
+### Validation and restriction system
+
+Maintain target-aware policy classes: advisory, warning, explicit opt-in for permissible experimental/performance risks, incompatible target (requiring a tested fallback or target exclusion), and **hard error**. Hard errors include invalid schema/A2UI messages, unsafe behaviour, attempt to mutate build-only settings remotely, unsupported device capabilities and mandatory platform policy violations. Every diagnostic carries a stable code, affected path/device profile and suggested remediation; CLI, SaaS and MCP give identical results.
+
 
 ## 7. Canonical data model and adapter gateway
 
@@ -244,16 +283,18 @@ Maintain three independently versioned artifacts:
 2. **Application runtime:** Rust/WASM/JS/native logic, updated remotely **only where platform distribution policies and approved application architecture permit**.
 3. **Application definition and customer data mappings:** declarative configuration + server-side adapter changes, updated independently subject to device compatibility and store rules.
 
-Every boot should determine its app ID, shell/runtime API version, declared capabilities and last-known-good configuration, and fetch a compatible release manifest when online.
+Every boot should derive its app ID, build manifest, shell/runtime API version, declared capabilities and last-known-good **runtime** configuration, then fetch a compatible runtime release manifest when online. Build-time properties are immutable for the installed artifact and cannot be replaced by an OTA configuration patch.
 
 Expected features:
 
 - immutable, signed or hash-verified manifests/assets and TLS;
-- schema/runtime/capability compatibility checks before activation;
-- pinning, staged rollouts, canaries and rollback;
+- independent validation of the build and runtime schema branches; runtime/schema/shell/capability compatibility checks before activation;
+- separately versioned build IDs and runtime configuration revisions, pinning, staged rollouts, canaries and rollback;
 - cached last-known-good app definition and an operable fallback when the SaaS/control plane is unavailable;
 - no unsupported “self-modifying” store binary scheme;
-- predictable reporting when a platform requires new certification.
+- predictable reporting when a platform requires new certification;
+- runtime publication rejects build-only changes, including package identifiers, native permissions, signing configuration, and store metadata;
+- localisation bundle revisions and error-code presentation changes can ship as runtime data when allowed by store policies.
 
 **Goal:** minimise unnecessary store updates, **not** promise to bypass review policies. Changes introducing functionality may still require review even when represented as JSON; platform policy is part of release validation.
 
@@ -308,8 +349,8 @@ Community reports are **evidence**, not certification. Critical playback/DRM/sto
 
 Proposed test layers:
 
-- **Contract tests:** JSON Schema, canonical API shape, migrations, defaulting and error responses.
-- **Interpreter tests:** component graph, binding, actions, route state and focus graph; deterministic replay.
+- **Contract tests:** separate build/runtime JSON Schemas and remote-edit isolation, canonical API shape, migrations, defaulting, versioned error codes and error responses; locale fallback, parameter types and copy completeness.
+- **Interpreter tests:** A2UI component graph, binding, actions, route state, focus graph, localised text formatting and RTL direction; deterministic replay.
 - **Adapter tests:** mapping, malformed input, pagination, timeouts and isolation, including DVB-I metadata samples.
 - **Playback tests:** supported manifests, source selection, lifecycle and error outcomes.
 - **Platform harness:** remote input, focus, lifecycle, launch latency, animation smoothness/frame pacing, font/rendering fidelity, secure video overlay behaviour, memory pressure and device capability probes.
@@ -343,7 +384,7 @@ No client data or app-definition lock-in: provide export/import and self-hosting
 ### M0 — Specification and proofs
 
 - Approve product principles and architecture boundary.
-- Write initial RFCs for application JSON, canonical API, capability manifest and focus navigation.
+- Write initial RFCs for A2UI TV catalog/application manifest, separated build/runtime JSON branches, canonical API, error-code taxonomy, localisation/fallback policy, capabilities and focus navigation.
 - Prototype a directly A2UI-compatible screen and SmartTVKit TV catalogue rendered by a Rust-owned scene graph in a desktop-browser harness, then test graphics/performance on actual TVs.
 - Prototype parsing/validation of a sample DVB-I service list.
 - Investigate native and web-runtime GPU backends for the Rust renderer, video overlay/DRM integration and explicit fallback profiles; record feasibility on named hardware.
@@ -356,7 +397,7 @@ No client data or app-definition lock-in: provide export/import and self-hosting
 - D-pad style remote input, screen navigation, content rail and detail screen.
 - Canonical mock data and simple self-hostable adapter.
 - HLS playback through a browser/native media path where supported.
-- Schema validator, error reporting, local development instructions and CI contract tests.
+- Separate build/runtime schema validators, initial localisation bundles, stable core error code registry, local development instructions and CI contract tests.
 
 **Exit:** a new engineer can clone, customise and run a sample TV app without managed services.
 
@@ -409,6 +450,9 @@ Early success is measured by **independent reuse and portability**, not line cou
 | D-09 | Separate desktop-browser harness from actual web-runtime TVs; device-verified support matrix | Agreed direction |
 | D-10 | SaaS commercial capabilities kept outside the core OSS dependency path | Proposed |
 | D-11 | High UI config expressiveness with graded warnings/acknowledgements and non-overridable hard policy checks | Agreed direction; RFC pending |
+| D-12 | First-class localisation/configurable copy through versioned runtime locale bundles, with separate store metadata | Agreed direction; RFC pending |
+| D-13 | Stable structured error codes and localised presentation/recovery | Agreed direction; RFC pending |
+| D-14 | Separate top-level `build` and `runtime` schema branches, independent validation and immutable installed build manifest | Agreed direction; RFC pending |
 
 ## 20. Open questions for the next RFCs
 
@@ -422,7 +466,10 @@ Early success is measured by **independent reuse and portability**, not line cou
 8. **Support matrix:** Which exact TV models/OS engines become M2 targets, and what are acceptable frame-time, memory, focus latency, boot time and fallback thresholds?
 9. **Distribution:** Which platforms permit hosted assets, and which require packaged-only runtimes for concrete app classes and store policies?
 10. **Configuration restriction engine:** What warnings, opt-in overrides, non-overridable errors and compatibility diagnostics are needed for CLI/MCP and release gating?
-11. **Project organisation:** What governance, contributor policy, release cadence and naming conventions do we want before inviting contributions?
+11. **Localisation:** What message formatting standard, fallback sequence, copy-bundle format and RTL/font test criteria should we mandate?
+12. **Error taxonomy:** What registry, code namespaces, severity/retry classes, provider mapping and deprecation rules belong in v1?
+13. **Build/runtime schema:** Which precise properties are build-only vs remotely mutable for each platform, and how will release validation enforce that separation?
+14. **Project organisation:** What governance, contributor policy, release cadence and naming conventions do we want before inviting contributions?
 
 ## 21. Standards and reference documents
 
