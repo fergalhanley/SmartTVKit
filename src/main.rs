@@ -4,6 +4,10 @@
 
 use macroquad::prelude::*;
 use smarttvkit_demo::{Direction, Navigation, Scene, BUNDLED_A2UI};
+use smarttvkit_demo::source::{from_project, SceneSource};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 const VIEW_W: f32 = 1280.0;
 const VIEW_H: f32 = 720.0;
@@ -49,15 +53,80 @@ fn translucent(color: Color, alpha: f32) -> Color {
     Color::new(color.r, color.g, color.b, alpha)
 }
 
-async fn load_scene() -> Result<Scene, String> {
-    #[cfg(target_arch = "wasm32")]
-    let path = format!("{CONFIG_PATH}?t={}", get_time());
+/// Choose local/remote A2UI from the runtime branch of a project definition.
+/// A developer-selected local fixture remains supported for backwards compatibility.
+async fn configured_source() -> Result<SceneSource, String> {
     #[cfg(not(target_arch = "wasm32"))]
-    let path = std::env::var("SMARTTVKIT_A2UI_FILE").unwrap_or_else(|_| CONFIG_PATH.to_owned());
+    if let Ok(path) = std::env::var("SMARTTVKIT_A2UI_FILE") {
+        return Ok(SceneSource::Local(path));
+    }
 
-    let content = macroquad::file::load_string(&path)
-        .await
-        .map_err(|error| format!("Could not load {path}: {error}"))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let project_path = std::env::var("SMARTTVKIT_PROJECT")
+        .unwrap_or_else(|_| "app/project.json".to_owned());
+    #[cfg(target_arch = "wasm32")]
+    let project_path = "../app/project.json".to_owned();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let project = std::fs::read_to_string(&project_path)
+        .map_err(|error| format!("could not read {project_path}: {error}"))?;
+    #[cfg(target_arch = "wasm32")]
+    let project = macroquad::file::load_string(&project_path).await
+        .map_err(|error| format!("could not load {project_path}: {error}"))?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let locale = std::env::var("SMARTTVKIT_LOCALE").ok();
+    #[cfg(target_arch = "wasm32")]
+    let locale: Option<String> = None;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let url = std::env::var("SMARTTVKIT_A2UI_URL").ok();
+    #[cfg(target_arch = "wasm32")]
+    let url: Option<String> = None;
+
+    let source = from_project(
+        &project,
+        CONFIG_PATH,
+        locale.as_deref(),
+        url.as_deref(),
+    )?;
+
+    // Browser-relative asset paths are anchored at /web/, not repository root.
+    #[cfg(target_arch = "wasm32")]
+    let source = match source {
+        SceneSource::Local(path) if path.starts_with("app/") =>
+            SceneSource::Local(format!("../{path}")),
+        otherwise => otherwise,
+    };
+
+    Ok(source)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type PendingScene = Receiver<Result<Scene, String>>;
+
+/// Fetch and validate off the render thread; never freeze the animation loop
+/// while a backend is down or slow to respond.
+#[cfg(not(target_arch = "wasm32"))]
+fn request_scene(source: SceneSource) -> PendingScene {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = smarttvkit_demo::source::load_native(&source);
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn load_browser_scene(source: &SceneSource) -> Result<Scene, String> {
+    let path = source.path();
+    let separator = if path.contains('?') { '&' } else { '?' };
+    let url = format!("{path}{separator}cacheBust={}", get_time());
+    let content = macroquad::file::load_string(&url).await
+        .map_err(|error| format!("could not fetch {path}: {error}"))?;
+    if content.len() as u64 > smarttvkit_demo::source::MAX_A2UI_BYTES {
+        return Err("A2UI response exceeds 1 MiB".into());
+    }
     Scene::from_a2ui_jsonl(&content).map_err(|error| error.to_string())
 }
 
@@ -313,14 +382,33 @@ fn pointer_to_scene() -> (f32, f32) {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let (mut scene, mut status) = match load_scene().await {
-        Ok(scene) => (scene, "A2UI FILE LOADED".to_string()),
+    // Always start with a known-good scene. A remote fetch may fail, but must
+    // never leave the application with a blank or invalid UI.
+    let mut scene = Scene::from_a2ui_jsonl(BUNDLED_A2UI)
+        .expect("bundled A2UI example must parse");
+    let source = match configured_source().await {
+        Ok(source) => source,
         Err(error) => {
-            let fallback = Scene::from_a2ui_jsonl(BUNDLED_A2UI)
-                .expect("bundled A2UI example must parse");
-            (fallback, format!("FALLBACK: {error}"))
+            eprintln!("SmartTVKit project configuration: {error}");
+            SceneSource::Local(CONFIG_PATH.to_owned())
         }
     };
+    let mut status = format!("LOADING {}", source.label());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut pending = Some(request_scene(source.clone()));
+
+    #[cfg(target_arch = "wasm32")]
+    match load_browser_scene(&source).await {
+        Ok(new_scene) => {
+            scene = new_scene;
+            status = format!("{} READY", source.label());
+        }
+        Err(error) => {
+            eprintln!("SmartTVKit A2UI: {error}");
+            status = "OFFLINE - BUNDLED UI".to_owned();
+        }
+    }
 
     let mut navigation = Navigation::default();
     let mut focus_x = CARD_LEFT;
@@ -345,15 +433,48 @@ async fn main() {
         if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Backspace) {
             navigation.back();
         }
-        if is_key_pressed(KeyCode::R) {
-            match load_scene().await {
-                Ok(new_scene) => {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Poll for background HTTP/file completion without blocking frames.
+            let completion = pending.as_ref().map(|rx| rx.try_recv());
+            match completion {
+                Some(Ok(Ok(new_scene))) => {
+                    pending = None;
                     scene = new_scene;
                     navigation.reset_if_out_of_bounds(&scene);
-                    status = "A2UI RELOADED".to_string();
+                    status = format!("{} READY", source.label());
                 }
-                Err(error) => {
-                    status = format!("RELOAD FAILED: {error}");
+                Some(Ok(Err(error))) => {
+                    pending = None;
+                    eprintln!("SmartTVKit A2UI: {error}");
+                    status = "LOAD FAILED - PREVIOUS UI KEPT".to_owned();
+                }
+                Some(Err(TryRecvError::Disconnected)) => {
+                    pending = None;
+                    status = "A2UI REQUEST INTERRUPTED".to_owned();
+                }
+                _ => {}
+            }
+        }
+
+        if is_key_pressed(KeyCode::R) {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                pending = Some(request_scene(source.clone()));
+                status = format!("REFRESHING {}", source.label());
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                match load_browser_scene(&source).await {
+                    Ok(new_scene) => {
+                        scene = new_scene;
+                        navigation.reset_if_out_of_bounds(&scene);
+                        status = format!("{} UPDATED", source.label());
+                    }
+                    Err(error) => {
+                        eprintln!("SmartTVKit A2UI: {error}");
+                        status = "LOAD FAILED - PREVIOUS UI KEPT".to_owned();
+                    }
                 }
             }
         }
