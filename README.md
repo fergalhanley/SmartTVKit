@@ -20,7 +20,7 @@ A future optional SmartTVKit Studio/Cloud may offer managed editing, adapters, b
 
 ## Specification
 
-See [High-Level Specification](docs/HIGH_LEVEL_SPEC.md) for the proposed architecture, goals, support matrix, milestones and open decisions.
+See the [High-Level Specification](docs/HIGH_LEVEL_SPEC.md) for the proposed architecture, goals, support matrix and milestones, and the [Architecture Review Decisions](docs/ARCHITECTURE_REVIEW_DECISIONS.md) for decisions on a Rust-owned UI renderer, direct A2UI interoperability, DVB-I identity mapping, browser-vs-TV targets and rich configuration policy.
 
 The specification is a review draft. Platform support and implementation decisions are **goals**, not promises of current support.
 
