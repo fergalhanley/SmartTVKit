@@ -16,6 +16,20 @@
 
 Demo visuals are generated procedurally to avoid introducing stock imagery and network-dependent media into the first rendering spike. A hardware video plane, texture streaming, font shaping, accessibility, RTL and real playback remain future work.
 
+## Direct backend mode
+
+The renderer can now fetch an A2UI v0.9.1 scene **directly from an HTTP(S) backend**. When run natively, network/file loading happens off the render thread; the bundled scene remains visible until a validated response is ready.
+
+Start Elsewhere TV API from its private repository, then run:
+
+```bash
+SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json cargo run
+```
+
+Change the `runtime.api.baseUrl` in the example project to point to another compatible backend; use `SMARTTVKIT_LOCALE` to select language. Press **R** to reload directly from the source. Failures are printed to stderr and preserve the previous scene.
+
+The standalone open-source default is still `cargo run` and loads its own local A2UI fixture.
+
 ## Run on macOS / Linux / Windows
 
 Install stable [Rust](https://rustup.rs/) once, then from the repository root:
