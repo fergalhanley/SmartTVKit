@@ -1,0 +1,19 @@
+[package]
+name = "smarttvkit-demo"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "SmartTVKit Rust UI renderer feasibility prototype"
+
+[[bin]]
+name = "smarttvkit_demo"
+path = "src/main.rs"
+
+[dependencies]
+macroquad = "0.4.16"
+serde_json = "1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"

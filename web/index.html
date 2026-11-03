@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartTVKit — Rust UI prototype</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #08101e; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+    #help { position: fixed; right: 14px; bottom: 12px; color: #9ca9c2;
+            font: 12px system-ui, sans-serif; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas" tabindex="0" aria-label="SmartTVKit canvas; use arrow keys to navigate"></canvas>
+  <div id="help">Click canvas, then use arrows / Enter / Esc / R to reload configuration.</div>
+  <!-- Prototype loader from the official Macroquad README. Production builds must vendor/pin it. -->
+  <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
+  <script>
+    document.getElementById("glcanvas").focus();
+    load("../target/wasm32-unknown-unknown/release/smarttvkit_demo.wasm");
+  </script>
+</body>
+</html>
