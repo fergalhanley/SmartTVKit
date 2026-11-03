@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "0.1-draft",
+  "build": {
+    "applicationId": "org.smarttvkit.demo",
+    "targets": [
+      "desktop",
+      "web-wasm"
+    ],
+    "declaredLocales": [
+      "en-AU"
+    ],
+    "notes": "Prototype only: build properties are not yet consumed by the renderer."
+  },
+  "runtime": {
+    "defaultLocale": "en-AU",
+    "uiSurface": "home",
+    "a2uiStream": "app/home.a2ui.jsonl",
+    "notes": "Prototype only: A2UI content is loaded from a local file. A production manifest parser is not implemented."
+  }
+}
