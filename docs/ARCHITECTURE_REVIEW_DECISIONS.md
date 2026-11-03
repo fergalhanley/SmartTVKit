@@ -86,6 +86,74 @@ Validators should produce machine-readable diagnostics (codes, severity, affecte
 
 The system should **warn, then allow a deliberate choice where technically and legally permissible** rather than silently narrowing expression. The user's acknowledged risk must be visible during later release review.
 
+## ADR-006 — First-class localisation and configurable copy
+
+**Decision:** Make localisation part of the **runtime configuration contract**, not something each screen hardcodes or each backend implements differently.
+
+- Use stable translation keys (for example `navigation.watchNow` and `errors.playback.unavailable`) referenced from A2UI component properties and catalogued action outcomes.
+- Manage versioned, remotely deliverable copy bundles using BCP 47 language tags (e.g. `en-AU`, `ja-JP`). Do not require an application rebuild for an ordinary text translation change on platforms that permit remote UI data updates.
+- Support a default language, an explicit deterministic fallback chain, device language/locale detection, user profile overrides and locale-aware content metadata selection. Missing keys should produce a diagnostic and a configured fallback rather than raw placeholders.
+- Support parameterised strings, plural/select variants, date/time/number/currency formatting and text direction (including RTL), with a well-defined formatting standard in the later RFC. Validate translation keys and typed arguments at build/config publication time.
+- Treat translation resources as **data referenced by the SmartTVKit app manifest and A2UI surfaces**, not non-standard A2UI protocol messages.
+- Allow declared/packaged language resources and language support metadata in the **build** branch where required by individual stores; allow supported UI copy and remotely managed locale bundles in **runtime**. Platform-specific store listing translations remain subject to store publication requirements.
+- Localise error messages through the same copy system, but keep the underlying machine error code language-neutral.
+
+**Acceptance:** Changing a `watchNow` translation or adding a supported translation bundle is handled in the runtime definition without modifying packaged executable code; fallback, pluralisation, direction and missing-key tests pass for the selected target profile.
+
+## ADR-007 — Stable structured error codes
+
+**Decision:** Expose a coherent **versioned, language-neutral error taxonomy** across the runtime, playback adapters, DVB-I module and canonical API gateway, rather than arbitrary strings or only vendor-native error details.
+
+A structured error should contain at minimum:
+
+- a stable, namespaced identifier such as `STVK.PLAYBACK.UNSUPPORTED_FORMAT`, `STVK.DVBI.SERVICE_NOT_FOUND`, or `STVK.CONFIG.UNSUPPORTED_COMPONENT`;
+- domain/category, severity, source and a documented retryability/recovery classification;
+- a stable localisation message key and typed, non-sensitive message parameters;
+- a correlation/diagnostic identifier, with optional redacted provenance and a safe underlying platform/provider code where permitted.
+
+Upstream DRM/player/HTTP/adapter errors are mapped at their platform or gateway boundary, preserving safe diagnostic detail without coupling UI screens to vendor-specific messages. **Public error code definitions are stable API contracts**: do not silently reuse a code for a different condition; version/deprecate codes with migration guidance.
+
+The runtime resolves error presentation and recovery actions through the configuration/A2UI component catalogue. The same registry supports logs, tests, compatibility reports, MCP diagnostics and the future SaaS monitoring workflow. Technical diagnostics must not expose personal data, secrets, DRM payloads or unredacted tokens.
+
+**Acceptance:** Equivalent faults on different supported players produce the same canonical code where semantics match, present appropriate localised copy, and have deterministically testable retry/fallback behaviour.
+
+## ADR-008 — Separate build-time and runtime configuration branches
+
+**Decision:** A SmartTVKit project's authoring schema has distinct top-level **`build`** and **`runtime`** branches, with independently validated sub-schemas and separate publication/activation pathways. *“Branch” here means a schema subtree, not a Git branch.*
+
+- **`build`:** fixed when compiling/packaging a target binary. Examples: target platform/product identifiers, package/application IDs, native permissions and entitlements, signing credential **references** (never secret material), OS capabilities, store-facing assets/metadata and bundled fallback/runtime capability selection.
+- **`runtime`:** versioned deliverable configuration interpreted by an installed client. Examples: A2UI surface references, navigation, theme, content/adapter endpoint selectors (non-secret), feature flags, device-profile UI rules, copy bundles, error-message mappings, experiments and allowed interaction flows.
+- Source projects may keep `build` and `runtime` adjacent in one JSON document or in separate JSON files. The canonical contract **retains two named roots**. Actual production binaries embed an **immutable build manifest**; clients download **runtime snapshots** that do not contain mutable build keys.
+- CI/build tools must evaluate the chosen build branch **before packaging**, validate platform-specific constraints, and record a reproducible `buildId`, schema/runtime requirements and content hashes.
+- Runtime distribution must enforce schema and shell/runtime compatibility, pinning, signature/hash validation, last-known-good cache, staged rollout and rollback. **Never allow a remote patch, visual editor or MCP operation to write build-only fields into an installed application.**
+- Some store or OS metadata (e.g. display name shown in a launcher, app icon, supported locales/permissions) require a new signed package even if the in-app presentation can change remotely. If a supposedly runtime-only setting has a certification implication, target-policy validation must report it rather than bypass review.
+- Never put private signing keys, connector secrets, server API credentials or privileged entitlements in downloadable runtime JSON.
+
+**Illustrative source structure — deliberately not a final schema**:
+
+```json
+{
+  "schemaVersion": "0.1-draft",
+  "build": {
+    "applicationId": "org.example.player",
+    "targets": ["tizen"],
+    "declaredLocales": ["en-AU", "ja-JP"]
+  },
+  "runtime": {
+    "defaultLocale": "en-AU",
+    "uiSurfaces": ["home"],
+    "localisationBundles": {
+      "en-AU": "locales/en-AU.json",
+      "ja-JP": "locales/ja-JP.json"
+    }
+  }
+}
+```
+
+UI surfaces in this example are **separate standard A2UI message documents**, not custom fields injected into A2UI envelopes. Exact shape, resource locations, metadata and version rules will be set by the schema RFC.
+
+**Acceptance:** A copy/navigation/UI change produces a new compatible runtime configuration without requiring a build; a native permission, package identifier or signing change is rejected by runtime publishing and requires a new build.
+
 ## Follow-on RFCs
 
 1. Rust scene graph, layout/typography, platform rendering backends, focus timing and video-surface composition.
@@ -93,5 +161,8 @@ The system should **warn, then allow a deliberate choice where technically and l
 3. DVB-I identity and source reconciliation; canonical service/channel/EPG model.
 4. Target profiles: desktop harness vs Tizen, webOS, VIDAA, HbbTV, Android, tvOS, Roku.
 5. Configuration policy engine and diagnostic schema, including non-overridable classes.
+6. Localisation bundle format, string interpolation, locale negotiation/fallback and content-language integration.
+7. Error-code registry, upstream mapping, recovery semantics and localised presentation.
+8. Build/runtime schema split, immutable manifests, store metadata and release compatibility rules.
 
 **Status:** These decisions are now recorded for review, not merged into `main`. Implementation will begin only after the specification is accepted.
