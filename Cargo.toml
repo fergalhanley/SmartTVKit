@@ -5,6 +5,10 @@ edition = "2021"
 license = "Apache-2.0"
 description = "SmartTVKit Rust UI renderer feasibility prototype"
 
+[[bin]]
+name = "smarttvkit_demo"
+path = "src/main.rs"
+
 [dependencies]
 macroquad = "0.4.16"
 serde_json = "1.0"
