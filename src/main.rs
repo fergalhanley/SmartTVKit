@@ -53,11 +53,11 @@ async fn load_scene() -> Result<Scene, String> {
     #[cfg(target_arch = "wasm32")]
     let path = format!("{CONFIG_PATH}?t={}", get_time());
     #[cfg(not(target_arch = "wasm32"))]
-    let path = CONFIG_PATH.to_owned();
+    let path = std::env::var("SMARTTVKIT_A2UI_FILE").unwrap_or_else(|_| CONFIG_PATH.to_owned());
 
     let content = macroquad::file::load_string(&path)
         .await
-        .map_err(|error| format!("Could not load {CONFIG_PATH}: {error}"))?;
+        .map_err(|error| format!("Could not load {path}: {error}"))?;
     Scene::from_a2ui_jsonl(&content).map_err(|error| error.to_string())
 }
 
