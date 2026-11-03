@@ -2,31 +2,46 @@
 
 **Elsewhere TV** is an original fictional multiverse television service built to validate SmartTVKit against a broad test backend. The service backend, Cloudflare deployment, Stream media mappings and hosting configuration belong in a separate private repository. This public example contains only portable client-facing config and a minimal test integration.
 
-## Run the first integration
+## Run the direct API integration
 
-1. Start Elsewhere TV backend locally on port 8787 (using its Node diagnostic runner or Cloudflare Wrangler).
-2. In SmartTVKit, on branch `feat/elsewhere-tv-example`, run:
-
-```bash
-python3 examples/elsewhere-tv/sync.py
-SMARTTVKIT_A2UI_FILE=app/elsewhere-tv.a2ui.jsonl cargo run
-```
-
-3. The Rust UI will display catalogue and channel data retrieved from the backend as an A2UI v0.9.1 message stream.
-4. After backend content or locale changes, re-run the sync script and press **R** inside the running client. No Rust recompile is needed.
-
-Japanese test:
+First start the **separate** Elsewhere TV backend from its own checkout:
 
 ```bash
-ELSEWHERE_TV_LOCALE=ja-JP python3 examples/elsewhere-tv/sync.py
-SMARTTVKIT_A2UI_FILE=app/elsewhere-tv.a2ui.jsonl cargo run
+node --experimental-strip-types scripts/dev.mjs
 ```
 
-Deployed API:
+It serves A2UI at http://localhost:8787/v1/a2ui/home?locale=en-AU.
+
+In the **SmartTVKit** repository on branch `feat/remote-a2ui-loading`:
 
 ```bash
-ELSEWHERE_TV_API=https://YOUR-WORKER.workers.dev python3 examples/elsewhere-tv/sync.py
+SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json cargo run
 ```
+
+The Rust application displays its bundled fallback immediately, **fetches the API directly**, validates the returned v0.9.1 messages, then displays the remote catalogue. There is no Python synchronisation step. Press **R** to fetch it again without recompilation. If the backend is unavailable or returns invalid A2UI, the client retains the previous working UI and logs the error.
+
+Switch language (restart the client after changing the locale):
+
+```bash
+SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json SMARTTVKIT_LOCALE=ja-JP cargo run
+```
+
+Against a deployed Worker, either change `runtime.api.baseUrl` in `project.json` or override the full endpoint:
+
+```bash
+SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json SMARTTVKIT_A2UI_URL=https://YOUR-WORKER.workers.dev/v1/a2ui/home cargo run
+```
+
+To use a local A2UI fixture instead, you can still supply `SMARTTVKIT_A2UI_FILE`. The original `app/project.json` keeps the open-source bundled demo independent of Elsewhere TV.
+
+### Browser/WASM
+
+The browser runtime reads `app/project.json` over HTTP. To enable direct network loading in that build, set `runtime.api.baseUrl` there and run `bash scripts/run-web.sh`. The backend must allow the browser origin through CORS (the local diagnostic runner does). Production deployments should be HTTPS and configure approved origins.
+
+### Legacy fixture sync
+
+The earlier `sync.py` script remains available for offline snapshots and comparison tests, but is **no longer required** for desktop live-backend loading.
+
 
 ## Architectural boundaries
 
@@ -43,7 +58,7 @@ The sample `project.json` illustrates the requested split between build-time and
 
 ## Current limitations
 
-This is one-off fixture synchronisation, not a true network-driven Rust client. The renderer's current Basic Catalog subset supports `Column`, `Row`, `Card`, `Text`; it does not yet implement live HLS playback, search, EPG screens, authentication flows or the larger A2UI TV component catalogue.
+The client now directly loads the configured A2UI endpoint at startup and on manual refresh. It still renders only one scene from a limited A2UI Basic Catalog subset; it is not yet a streaming-data, search, or media-playback client. The renderer's current Basic Catalog subset supports `Column`, `Row`, `Card`, `Text`; it does not yet implement live HLS playback, search, EPG screens, authentication flows or the larger A2UI TV component catalogue.
 
 The service already exposes those backend concepts to drive forthcoming frontend work. It uses **synthetic DVB-I-style identifiers** for mapping tests, not a standards-conformant DVB-I service list. The initial artwork is original procedural placeholder SVG pending AI-generated art.
 

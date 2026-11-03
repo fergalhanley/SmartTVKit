@@ -37,6 +37,14 @@ cargo run
 
 It renders a demo catalogue using an editable A2UI v0.9.1 JSONL message stream. Use arrows/WASD, Enter and Escape for navigation; press **R** after editing \`app/home.a2ui.jsonl\` to update the on-screen copy without recompiling.
 
+For the live Elsewhere TV integration, start its API locally and run:
+
+```bash
+SMARTTVKIT_PROJECT=examples/elsewhere-tv/project.json cargo run
+```
+
+This fetches the A2UI screen at startup and refreshes directly with **R**, without the old Python sync script. See [Elsewhere TV example](examples/elsewhere-tv/README.md).
+
 For the browser/WASM version use \`bash scripts/run-web.sh\` and visit \`http://localhost:8000/web/\`.
 
 See [renderer prototype documentation](docs/RENDERER_PROTOTYPE.md) for prerequisites, details, current limits and tests.
