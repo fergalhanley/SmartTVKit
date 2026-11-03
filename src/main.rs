@@ -18,6 +18,19 @@ const CONFIG_PATH: &str = "../app/home.a2ui.jsonl";
 #[cfg(not(target_arch = "wasm32"))]
 const CONFIG_PATH: &str = "app/home.a2ui.jsonl";
 
+/// Set up top-left-origin UI coordinates in a fixed 1280x720 design space.
+///
+/// Macroquad's screen camera *already* reverses the Y axis internally.
+/// Therefore a POSITIVE Y zoom makes increasing UI Y move down the screen.
+/// Camera2D::from_display_rect uses negative Y zoom, which mirrors this UI.
+fn ui_camera() -> Camera2D {
+    Camera2D {
+        target: vec2(VIEW_W * 0.5, VIEW_H * 0.5),
+        zoom: vec2(2.0 / VIEW_W, 2.0 / VIEW_H),
+        ..Default::default()
+    }
+}
+
 fn window_conf() -> Conf {
     Conf {
         window_title: "SmartTVKit — Rust UI prototype".to_string(),
@@ -366,9 +379,7 @@ async fn main() {
             }
         }
 
-        set_camera(&Camera2D::from_display_rect(Rect::new(
-            0.0, 0.0, VIEW_W, VIEW_H,
-        )));
+        set_camera(&ui_camera());
         let time = get_time() as f32;
         draw_background(time);
         draw_header();
@@ -385,5 +396,26 @@ async fn main() {
         draw_footer(&status);
 
         next_frame().await;
+    }
+}
+
+#[cfg(test)]
+mod camera_tests {
+    use super::*;
+    use macroquad::camera::Camera;
+
+    /// Camera matrix coordinates are normalised device coordinates:
+    /// top left = (-1, +1), bottom right = (+1, -1).
+    /// This does not need a graphics context or a physical display.
+    #[test]
+    fn top_left_ui_coordinates_project_upright() {
+        let matrix = ui_camera().matrix();
+        let top_left = matrix.transform_point3(vec3(0.0, 0.0, 0.0));
+        let bottom_right = matrix.transform_point3(vec3(VIEW_W, VIEW_H, 0.0));
+
+        assert!((top_left.x + 1.0).abs() < 0.0001);
+        assert!((top_left.y - 1.0).abs() < 0.0001);
+        assert!((bottom_right.x - 1.0).abs() < 0.0001);
+        assert!((bottom_right.y + 1.0).abs() < 0.0001);
     }
 }
